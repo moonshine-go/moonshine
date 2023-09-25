@@ -15,7 +15,7 @@ func (c *Context) Writer() http.ResponseWriter {
 	return c.writer
 }
 
-func New(req http.Request, res http.ResponseWriter) *Context {
+func NewCtx(req http.Request, res http.ResponseWriter) *Context {
 	return &Context{
 		request: &req,
 		writer:  res,
