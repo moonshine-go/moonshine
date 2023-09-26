@@ -1,6 +1,10 @@
 package moonshine
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/go-playground/assert/v2"
+)
 
 func TestParams(t *testing.T) {
 	params := Params{
@@ -9,10 +13,7 @@ func TestParams(t *testing.T) {
 			Value: "value",
 		},
 	}
-	if params.ByName("key") != "value" {
-		t.Error("params.ByName() is not working")
-	}
-	if _, ok := params.Get("key"); !ok {
-		t.Error("params.Get() is not working")
-	}
+	assert.Equal(t, params.ByName("key"), "value")
+	_, ok := params.Get("key")
+	assert.Equal(t, ok, true)
 }
