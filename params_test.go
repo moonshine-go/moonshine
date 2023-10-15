@@ -3,7 +3,7 @@ package moonshine
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/go-playground/assert/v2"
 )
 
 func TestParams(t *testing.T) {
@@ -13,8 +13,7 @@ func TestParams(t *testing.T) {
 			Value: "value",
 		},
 	}
-	assert.Equal(t, "value", params.ByName("key"))
-	if _, ok := params.Get("key"); !ok {
-		t.Error("params.Get() is not working")
-	}
+	assert.Equal(t, params.ByName("key"), "value")
+	_, ok := params.Get("key")
+	assert.Equal(t, ok, true)
 }
