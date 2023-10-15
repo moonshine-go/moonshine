@@ -1,6 +1,10 @@
 package moonshine
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestParams(t *testing.T) {
 	params := Params{
@@ -9,9 +13,7 @@ func TestParams(t *testing.T) {
 			Value: "value",
 		},
 	}
-	if params.ByName("key") != "value" {
-		t.Error("params.ByName() is not working")
-	}
+	assert.Equal(t, "value", params.ByName("key"))
 	if _, ok := params.Get("key"); !ok {
 		t.Error("params.Get() is not working")
 	}
