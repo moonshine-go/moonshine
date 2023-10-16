@@ -3,32 +3,32 @@ package moonshine
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
 
 type Context struct {
-	request *http.Request
+	Request *http.Request
 	writer  http.ResponseWriter
 	mu      sync.RWMutex
-	params  *Params
+	Params  Params
 
 	Keys map[string]any
+
+	queryCache url.Values
 
 	errors []error
 }
 
 func (c *Context) Copy() *Context {
 	return &Context{
-		request: c.request,
+		Request: c.Request,
 		writer:  c.writer,
-		params:  c.params,
+		Params:  c.Params,
 		errors:  c.errors,
 	}
-}
-
-func (c *Context) Request() *http.Request {
-	return c.request
 }
 
 func (c *Context) Writer() http.ResponseWriter {
@@ -36,12 +36,10 @@ func (c *Context) Writer() http.ResponseWriter {
 }
 
 func (c *Context) Context() context.Context {
-	return c.request.Context()
+	return c.Request.Context()
 }
 
-/************************************/
 /************* KEY VALUE ************/
-/************************************/
 
 func (c *Context) Set(key string, value any) {
 	c.mu.Lock()
@@ -167,9 +165,79 @@ func (c *Context) Error(err error) {
 	c.mu.Unlock()
 }
 
+/************ GET DATA **************/
+
+// Param returns the value of the URL param.
+func (c *Context) Param(key string) string {
+	return c.Params.ByName(key)
+}
+
+func (c *Context) AddParam(key, value string) {
+	c.Params = append(c.Params, Param{Key: key, Value: value})
+}
+
+func (c *Context) initQueryCache() {
+	if c.queryCache == nil {
+		if c.Request != nil {
+			c.queryCache = c.Request.URL.Query()
+		} else {
+			c.queryCache = url.Values{}
+		}
+	}
+}
+
+func (c *Context) Query(key string) (value string) {
+	value, _ = c.GetQuery(key)
+	return
+}
+
+func (c *Context) GetQuery(key string) (string, bool) {
+	if values, ok := c.GetQueryArray(key); ok {
+		return values[0], ok
+	}
+	return "", false
+}
+
+func (c *Context) DefaultQuery(key, defaultValue string) string {
+	if value, ok := c.GetQuery(key); ok {
+		return value
+	}
+	return defaultValue
+}
+
+func (c *Context) GetQueryArray(key string) (values []string, ok bool) {
+	c.initQueryCache()
+	values, ok = c.queryCache[key]
+	return
+}
+
+func (c *Context) QueryMap(key string) (dicts map[string]string) {
+	dicts, _ = c.GetQueryMap(key)
+	return
+}
+
+func (c *Context) GetQueryMap(key string) (map[string]string, bool) {
+	c.initQueryCache()
+	return c.get(c.queryCache, key)
+}
+
+func (c *Context) get(m map[string][]string, key string) (map[string]string, bool) {
+	dicts := make(map[string]string)
+	exist := false
+	for k, v := range m {
+		if i := strings.IndexByte(k, '['); i >= 1 && k[0:i] == key {
+			if j := strings.IndexByte(k[i+1:], ']'); j >= 1 {
+				exist = true
+				dicts[k[i+1:][:j]] = v[0]
+			}
+		}
+	}
+	return dicts, exist
+}
+
 func NewCtx(req http.Request, res http.ResponseWriter) *Context {
 	return &Context{
-		request: &req,
+		Request: &req,
 		writer:  res,
 	}
 }
