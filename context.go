@@ -18,6 +18,7 @@ type Context struct {
 	Keys map[string]any
 
 	queryCache url.Values
+	formCache  url.Values
 
 	errors []error
 }
@@ -37,6 +38,20 @@ func (c *Context) Writer() http.ResponseWriter {
 
 func (c *Context) Context() context.Context {
 	return c.Request.Context()
+}
+
+func (c *Context) get(m map[string][]string, key string) (map[string]string, bool) {
+	dicts := make(map[string]string)
+	exist := false
+	for k, v := range m {
+		if i := strings.IndexByte(k, '['); i >= 1 && k[0:i] == key {
+			if j := strings.IndexByte(k[i+1:], ']'); j >= 1 {
+				exist = true
+				dicts[k[i+1:][:j]] = v[0]
+			}
+		}
+	}
+	return dicts, exist
 }
 
 /************* KEY VALUE ************/
@@ -167,6 +182,8 @@ func (c *Context) Error(err error) {
 
 /************ GET DATA **************/
 
+/************ GET PARAM *************/
+
 // Param returns the value of the URL param.
 func (c *Context) Param(key string) string {
 	return c.Params.ByName(key)
@@ -175,6 +192,8 @@ func (c *Context) Param(key string) string {
 func (c *Context) AddParam(key, value string) {
 	c.Params = append(c.Params, Param{Key: key, Value: value})
 }
+
+/************ GET QUERY *************/
 
 func (c *Context) initQueryCache() {
 	if c.queryCache == nil {
@@ -221,19 +240,7 @@ func (c *Context) GetQueryMap(key string) (map[string]string, bool) {
 	return c.get(c.queryCache, key)
 }
 
-func (c *Context) get(m map[string][]string, key string) (map[string]string, bool) {
-	dicts := make(map[string]string)
-	exist := false
-	for k, v := range m {
-		if i := strings.IndexByte(k, '['); i >= 1 && k[0:i] == key {
-			if j := strings.IndexByte(k[i+1:], ']'); j >= 1 {
-				exist = true
-				dicts[k[i+1:][:j]] = v[0]
-			}
-		}
-	}
-	return dicts, exist
-}
+/************ GET FORM *************/
 
 func NewCtx(req http.Request, res http.ResponseWriter) *Context {
 	return &Context{
