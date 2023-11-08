@@ -2,12 +2,16 @@ package moonshine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 )
+
+const defaultMultipartMemory = 32 << 20
 
 type Context struct {
 	Request *http.Request
@@ -19,6 +23,8 @@ type Context struct {
 
 	queryCache url.Values
 	formCache  url.Values
+
+	MaxMultipartMemory int64
 
 	errors []error
 }
@@ -242,9 +248,63 @@ func (c *Context) GetQueryMap(key string) (map[string]string, bool) {
 
 /************ GET FORM *************/
 
-func NewCtx(req http.Request, res http.ResponseWriter) *Context {
+func (c *Context) PostForm(key string) (value string) {
+	value, _ = c.GetPostForm(key)
+	return
+}
+
+func (c *Context) DefaultPostForm(key, defaultValue string) string {
+	if value, ok := c.GetPostForm(key); ok {
+		return value
+	}
+	return defaultValue
+}
+
+func (c *Context) initFormCache() {
+	if c.formCache == nil {
+		c.formCache = make(url.Values)
+		req := c.Request
+		if err := req.ParseMultipartForm(c.MaxMultipartMemory); err != nil {
+			if !errors.Is(err, http.ErrNotMultipart) {
+				fmt.Printf("error on parse multipart form array: %v", err)
+			}
+		}
+		c.formCache = req.PostForm
+	}
+}
+
+func (c *Context) GetPostForm(key string) (string, bool) {
+	if values, ok := c.GetPostFormArray(key); ok {
+		return values[0], ok
+	}
+	return "", false
+}
+
+func (c *Context) PostFormArray(key string) (values []string) {
+	values, _ = c.GetPostFormArray(key)
+	return
+}
+
+func (c *Context) GetPostFormArray(key string) (values []string, ok bool) {
+	c.initFormCache()
+	values, ok = c.formCache[key]
+	return
+}
+
+func (c *Context) PostFormMap(key string) (dicts map[string]string) {
+	dicts, _ = c.GetPostFormMap(key)
+	return
+}
+
+func (c *Context) GetPostFormMap(key string) (map[string]string, bool) {
+	c.initFormCache()
+	return c.get(c.formCache, key)
+}
+
+func NewCtx(req *http.Request, res http.ResponseWriter) *Context {
 	return &Context{
-		Request: &req,
-		writer:  res,
+		Request:            req,
+		writer:             res,
+		MaxMultipartMemory: defaultMultipartMemory,
 	}
 }
