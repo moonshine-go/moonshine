@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -299,6 +303,48 @@ func (c *Context) PostFormMap(key string) (dicts map[string]string) {
 func (c *Context) GetPostFormMap(key string) (map[string]string, bool) {
 	c.initFormCache()
 	return c.get(c.formCache, key)
+}
+
+/************ GET FILE *************/
+
+func (c *Context) FormFile(name string) (*multipart.FileHeader, error) {
+	if c.Request.MultipartForm == nil {
+		if err := c.Request.ParseMultipartForm(c.MaxMultipartMemory); err != nil {
+			return nil, err
+		}
+	}
+	f, fh, err := c.Request.FormFile(name)
+	if err != nil {
+		return nil, err
+	}
+	f.Close()
+	return fh, err
+}
+
+func (c *Context) MultipartForm() (*multipart.Form, error) {
+	err := c.Request.ParseMultipartForm(c.MaxMultipartMemory)
+	return c.Request.MultipartForm, err
+}
+
+func (c *Context) SaveUploadedFile(file *multipart.FileHeader, dst string) error {
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	if err = os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+		return err
+	}
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, src)
+	return err
 }
 
 func NewCtx(req *http.Request, res http.ResponseWriter) *Context {
