@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -13,15 +14,21 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin/binding"
 )
 
 const defaultMultipartMemory = 32 << 20
+
+const abortIndex int8 = math.MaxInt8 >> 1
 
 type Context struct {
 	Request *http.Request
 	writer  http.ResponseWriter
 	mu      sync.RWMutex
 	Params  Params
+
+	index int8
 
 	Keys map[string]any
 
@@ -62,6 +69,30 @@ func (c *Context) get(m map[string][]string, key string) (map[string]string, boo
 		}
 	}
 	return dicts, exist
+}
+
+func (c *Context) Abort() {
+	c.index = abortIndex
+}
+
+func (c *Context) Status(code int) {
+	c.Writer.WriteHeader(code)
+}
+
+func (c *Context) AbortWithStatus(code int) {
+	c.Status(code)
+	c.Writer.WriteHeaderNow()
+	c.Abort()
+}
+
+func (c *Context) AbortWithStatusJSON(code int, jsonObj any) {
+	c.Abort()
+	c.JSON(code, jsonObj)
+}
+
+func (c *Context) AbortWithError(code int, err error) error {
+	c.AbortWithStatus(code)
+	return c.Error(err)
 }
 
 /************* KEY VALUE ************/
@@ -181,13 +212,14 @@ func (c *Context) GetStringMapStringSlice(key string) (smss map[string][]string)
 	return
 }
 
-func (c *Context) Error(err error) {
+func (c *Context) Error(err error) error {
 	if err == nil {
 		panic("err is nil")
 	}
 	c.mu.Lock()
 	c.errors = append(c.errors, err)
 	c.mu.Unlock()
+	return err
 }
 
 /************ GET DATA **************/
@@ -345,6 +377,111 @@ func (c *Context) SaveUploadedFile(file *multipart.FileHeader, dst string) error
 
 	_, err = io.Copy(out, src)
 	return err
+}
+
+/************ BIND *************/
+
+func (c *Context) Bind(obj any) error {
+	b := binding.Default(c.Request.Method, c.ContentType())
+	return c.MustBindWith(obj, b)
+}
+
+// BindJSON is a shortcut for c.MustBindWith(obj, binding.JSON).
+func (c *Context) BindJSON(obj any) error {
+	return c.MustBindWith(obj, binding.JSON)
+}
+
+// BindXML is a shortcut for c.MustBindWith(obj, binding.BindXML).
+func (c *Context) BindXML(obj any) error {
+	return c.MustBindWith(obj, binding.XML)
+}
+
+// BindQuery is a shortcut for c.MustBindWith(obj, binding.Query).
+func (c *Context) BindQuery(obj any) error {
+	return c.MustBindWith(obj, binding.Query)
+}
+
+// BindYAML is a shortcut for c.MustBindWith(obj, binding.YAML).
+func (c *Context) BindYAML(obj any) error {
+	return c.MustBindWith(obj, binding.YAML)
+}
+
+// BindTOML is a shortcut for c.MustBindWith(obj, binding.TOML).
+func (c *Context) BindTOML(obj any) error {
+	return c.MustBindWith(obj, binding.TOML)
+}
+
+// BindHeader is a shortcut for c.MustBindWith(obj, binding.Header).
+func (c *Context) BindHeader(obj any) error {
+	return c.MustBindWith(obj, binding.Header)
+}
+
+func (c *Context) BindUri(obj any) error {
+	if err := c.ShouldBindUri(obj); err != nil {
+		c.AbortWithError(http.StatusBadRequest, err).SetType(ErrorTypeBind) //nolint: errcheck
+		return err
+	}
+	return nil
+}
+
+func (c *Context) MustBindWith(obj any, b binding.Binding) error {
+	if err := c.ShouldBindWith(obj, b); err != nil {
+		c.AbortWithError(http.StatusBadRequest, err).SetType(ErrorTypeBind)
+		return err
+	}
+	return nil
+}
+
+func (c *Context) ShouldBind(obj any) error {
+	b := binding.Default(c.Request.Method, c.ContentType())
+	return c.ShouldBindWith(obj, b)
+}
+
+// ShouldBindJSON is a shortcut for c.ShouldBindWith(obj, binding.JSON).
+func (c *Context) ShouldBindJSON(obj any) error {
+	return c.ShouldBindWith(obj, binding.JSON)
+}
+
+// ShouldBindXML is a shortcut for c.ShouldBindWith(obj, binding.XML).
+func (c *Context) ShouldBindXML(obj any) error {
+	return c.ShouldBindWith(obj, binding.XML)
+}
+
+// ShouldBindQuery is a shortcut for c.ShouldBindWith(obj, binding.Query).
+func (c *Context) ShouldBindQuery(obj any) error {
+	return c.ShouldBindWith(obj, binding.Query)
+}
+
+// ShouldBindYAML is a shortcut for c.ShouldBindWith(obj, binding.YAML).
+func (c *Context) ShouldBindYAML(obj any) error {
+	return c.ShouldBindWith(obj, binding.YAML)
+}
+
+// ShouldBindTOML is a shortcut for c.ShouldBindWith(obj, binding.TOML).
+func (c *Context) ShouldBindTOML(obj any) error {
+	return c.ShouldBindWith(obj, binding.TOML)
+}
+
+// ShouldBindHeader is a shortcut for c.ShouldBindWith(obj, binding.Header).
+func (c *Context) ShouldBindHeader(obj any) error {
+	return c.ShouldBindWith(obj, binding.Header)
+}
+
+// ShouldBindUri binds the passed struct pointer using the specified binding engine.
+func (c *Context) ShouldBindUri(obj any) error {
+	m := make(map[string][]string)
+	for _, v := range c.Params {
+		m[v.Key] = []string{v.Value}
+	}
+	return binding.Uri.BindUri(m, obj)
+}
+
+func (c *Context) ShouldBindWith(obj any, b binding.Binding) error {
+	return b.Bind(c.Request, obj)
+}
+
+func (c *Context) ContentType() string {
+	return filterFlags(c.requestHeader("Content-Type"))
 }
 
 func NewCtx(req *http.Request, res http.ResponseWriter) *Context {
