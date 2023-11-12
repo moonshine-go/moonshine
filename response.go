@@ -11,7 +11,7 @@ const (
 )
 
 type ResponseWriter struct {
-	writer http.ResponseWriter
+	http.ResponseWriter
 	status int
 	size   int
 }
@@ -29,7 +29,7 @@ func (w *ResponseWriter) WriteHeader(code int) {
 func (w *ResponseWriter) WriteHeaderNow() {
 	if !w.Written() {
 		w.size = 0
-		w.writer.WriteHeader(w.status)
+		w.WriteHeader(w.status)
 	}
 }
 

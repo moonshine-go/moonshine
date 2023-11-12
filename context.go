@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin/binding"
+	"github.com/gin-gonic/gin/render"
 )
 
 const defaultMultipartMemory = 32 << 20
@@ -24,7 +25,7 @@ const abortIndex int8 = math.MaxInt8 >> 1
 
 type Context struct {
 	Request *http.Request
-	writer  http.ResponseWriter
+	writer  *ResponseWriter
 	mu      sync.RWMutex
 	Params  Params
 
@@ -38,6 +39,8 @@ type Context struct {
 	MaxMultipartMemory int64
 
 	errors []error
+
+	sameSite http.SameSite
 }
 
 func (c *Context) Copy() *Context {
@@ -47,10 +50,6 @@ func (c *Context) Copy() *Context {
 		Params:  c.Params,
 		errors:  c.errors,
 	}
-}
-
-func (c *Context) Writer() http.ResponseWriter {
-	return c.writer
 }
 
 func (c *Context) Context() context.Context {
@@ -75,13 +74,9 @@ func (c *Context) Abort() {
 	c.index = abortIndex
 }
 
-func (c *Context) Status(code int) {
-	c.Writer.WriteHeader(code)
-}
-
 func (c *Context) AbortWithStatus(code int) {
 	c.Status(code)
-	c.Writer.WriteHeaderNow()
+	c.writer.WriteHeaderNow()
 	c.Abort()
 }
 
@@ -418,7 +413,7 @@ func (c *Context) BindHeader(obj any) error {
 
 func (c *Context) BindUri(obj any) error {
 	if err := c.ShouldBindUri(obj); err != nil {
-		c.AbortWithError(http.StatusBadRequest, err).SetType(ErrorTypeBind) //nolint: errcheck
+		c.AbortWithError(http.StatusBadRequest, err)
 		return err
 	}
 	return nil
@@ -426,7 +421,7 @@ func (c *Context) BindUri(obj any) error {
 
 func (c *Context) MustBindWith(obj any, b binding.Binding) error {
 	if err := c.ShouldBindWith(obj, b); err != nil {
-		c.AbortWithError(http.StatusBadRequest, err).SetType(ErrorTypeBind)
+		c.AbortWithError(http.StatusBadRequest, err)
 		return err
 	}
 	return nil
@@ -484,10 +479,108 @@ func (c *Context) ContentType() string {
 	return filterFlags(c.requestHeader("Content-Type"))
 }
 
+func (c *Context) IsWebsocket() bool {
+	if strings.Contains(strings.ToLower(c.requestHeader("Connection")), "upgrade") &&
+		strings.EqualFold(c.requestHeader("Upgrade"), "websocket") {
+		return true
+	}
+	return false
+}
+
+func (c *Context) requestHeader(key string) string {
+	return c.Request.Header.Get(key)
+}
+
+/************ RESPONSE *************/
+
+func (c *Context) Status(code int) {
+	c.writer.WriteHeader(code)
+}
+
+func (c *Context) Header(key, value string) {
+	if value == "" {
+		c.writer.Header().Del(key)
+		return
+	}
+	c.writer.Header().Set(key, value)
+}
+
+func (c *Context) SetSameSite(samesite http.SameSite) {
+	c.sameSite = samesite
+}
+
+func (c *Context) SetCookie(name, value string, maxAge int, path, domain string, secure, httpOnly bool) {
+	if path == "" {
+		path = "/"
+	}
+	http.SetCookie(c.writer, &http.Cookie{
+		Name:     name,
+		Value:    url.QueryEscape(value),
+		MaxAge:   maxAge,
+		Path:     path,
+		Domain:   domain,
+		SameSite: c.sameSite,
+		Secure:   secure,
+		HttpOnly: httpOnly,
+	})
+}
+
+func (c *Context) Cookie(name string) (string, error) {
+	cookie, err := c.Request.Cookie(name)
+	if err != nil {
+		return "", err
+	}
+	val, _ := url.QueryUnescape(cookie.Value)
+	return val, nil
+}
+
+func (c *Context) Render(code int, r render.Render) {
+	c.Status(code)
+
+	if !bodyAllowedForStatus(code) {
+		r.WriteContentType(c.writer)
+		c.writer.WriteHeaderNow()
+		return
+	}
+
+	if err := r.Render(c.writer); err != nil {
+		// Pushing error to c.Errors
+		_ = c.Error(err)
+		c.Abort()
+	}
+}
+
+func (c *Context) JSON(code int, obj any) {
+	c.Render(code, render.JSON{Data: obj})
+}
+
+/************ utils *************/
+
+func filterFlags(content string) string {
+	for i, char := range content {
+		if char == ' ' || char == ';' {
+			return content[:i]
+		}
+	}
+	return content
+}
+
+func bodyAllowedForStatus(status int) bool {
+	switch {
+	case status >= 100 && status <= 199:
+		return false
+	case status == http.StatusNoContent:
+		return false
+	case status == http.StatusNotModified:
+		return false
+	}
+	return true
+}
+
 func NewCtx(req *http.Request, res http.ResponseWriter) *Context {
 	return &Context{
 		Request:            req,
-		writer:             res,
+		writer:             NewResponseWriter(res),
 		MaxMultipartMemory: defaultMultipartMemory,
 	}
 }
